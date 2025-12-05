@@ -1,0 +1,155 @@
+from __future__ import annotations
+from dataclasses import MISSING
+import os
+import torch
+
+from booster_deploy.controllers.base_controller import BaseController, Policy
+from booster_deploy.controllers.controller_cfg import (
+    ControllerCfg,
+    MujocoControllerCfg,
+    PolicyCfg
+)
+from booster_deploy.robots.booster import K1_CFG
+from booster_deploy.utils.isaaclab.configclass import configclass
+from booster_deploy.utils.isaaclab import math as lab_math
+from booster_deploy.utils.motion_loader import MotionLoader
+
+
+class BeyondMimicPolicy(Policy):
+    def __init__(self, cfg: BeyondMimicPolicyCfg, controller: BaseController):
+        super().__init__(cfg, controller)
+        self.cfg = cfg
+        task_path = os.path.dirname(__file__)
+        self._model: torch.jit.ScriptModule = torch.jit.load(
+            f"{task_path}/{self.cfg.checkpoint_path}")
+        self._model.eval()
+
+        self.robot = controller.robot
+
+        self.action_scale = (
+            0.25 * self.robot.effort_limit / self.robot.joint_stiffness
+        )
+
+        self.motion = MotionLoader(
+            motion_file=f"{task_path}/{self.cfg.motion_path}",
+            body_names=self.robot.cfg.sim_body_names,
+            track_body_names=[self.cfg.anchor_body_name],
+            align_to_first_frame=True,
+        )
+
+    def reset(self) -> None:
+        self.init_root_quat_w_inv = lab_math.quat_inv(
+            self.robot.data.root_quat_w)
+        self.anchor_index = self.motion.track_body_names.index(
+            self.cfg.anchor_body_name)
+        self.current_frame = 0
+        self.last_action = torch.zeros(
+            self.robot.num_joints, dtype=torch.float32)
+
+    def _set_command(self):
+        row_ids = min(self.current_frame, self.motion.time_step_total - 1)
+
+        self.cmd_dof_pos = self.motion.joint_pos[row_ids]
+        self.cmd_dof_vel = self.motion.joint_vel[row_ids]
+
+        self.cmd_root_pos_w = self.motion.body_pos_w[
+            row_ids, self.anchor_index]
+        self.cmd_root_quat_w = self.motion.body_quat_w[
+            row_ids, self.anchor_index]
+
+    def compute_observation(self) -> torch.Tensor:
+        """Computes observations"""
+        self._set_command()
+
+        command = torch.cat([self.cmd_dof_pos, self.cmd_dof_vel], dim=0)
+        cur_root_quat_w = lab_math.quat_mul(
+            self.init_root_quat_w_inv, self.robot.data.root_quat_w)
+
+        pos, ori = lab_math.subtract_frame_transforms(
+            self.robot.data.root_pos_w,
+            cur_root_quat_w,
+            self.cmd_root_pos_w,
+            self.cmd_root_quat_w,
+        )
+
+        motion_anchor_pos_b = pos  # noqa: F841
+
+        motion_anchor_ori_b = lab_math.matrix_from_quat(ori)[..., :2].flatten()
+
+        real2sim_map = self.robot.data.real2sim_joint_indexes
+        dof_pos = self.robot.data.joint_pos[real2sim_map]
+        joint_pos = dof_pos - self.robot.default_joint_pos[real2sim_map]
+        joint_vel = self.robot.data.joint_vel[real2sim_map]
+
+        obs = torch.cat(
+            (
+                command,
+                # motion_anchor_pos_b,    # linear states
+                motion_anchor_ori_b,
+                # self.robot.data.root_lin_vel_b,           # linear states
+                self.robot.data.root_ang_vel_b,
+                joint_pos,
+                joint_vel,
+                self.last_action,
+            ),
+            dim=-1,
+        )
+        return obs.reshape(1, -1)
+
+    def inference(self) -> torch.Tensor:
+        """Called by the controller each step to obtain the action tensor.
+
+        Reads `robot.data` and velocity commands from the controller,
+        runs the underlying model's inference, and returns an action
+        as a `torch.Tensor`.
+        """
+
+        with torch.no_grad():
+            obs = self.compute_observation()
+            action = self._model(obs).flatten()
+
+        self.current_frame += 1
+        self.last_action = action
+
+        if action is None:
+            raise RuntimeError("Underlying model returned None from inference")
+
+        sim2real_map = self.robot.data.sim2real_joint_indexes
+        return (
+            action[sim2real_map] * self.action_scale
+            + self.robot.default_joint_pos
+        )
+
+
+@configclass
+class BeyondMimicPolicyCfg(PolicyCfg):
+    constructor = BeyondMimicPolicy
+    checkpoint_path: str = MISSING
+    motion_path: str = MISSING
+
+    anchor_body_name: str = "Trunk"
+
+
+@configclass
+class K1BeyondMimicControllerCfg(ControllerCfg):
+    robot = K1_CFG.replace(     # type: ignore
+        joint_stiffness=[
+            4.0, 4.0,
+            4.0, 4.0, 4.0, 4.0,
+            4.0, 4.0, 4.0, 4.0,
+            80., 80.0, 80., 80., 30., 30.,
+            80., 80.0, 80., 80., 30., 30.,
+        ],
+        joint_damping=[
+            1., 1.,
+            1., 1., 1., 1.,
+            1., 1., 1., 1.,
+            2., 2., 2., 2., 2., 2.,
+            2., 2., 2., 2., 2., 2.,
+        ]
+    )
+    enable_velocity_commands = False
+    policy: BeyondMimicPolicyCfg = BeyondMimicPolicyCfg()
+    mujoco = MujocoControllerCfg(
+        init_pos=[0.0, 0.0, 0.57],
+    )
