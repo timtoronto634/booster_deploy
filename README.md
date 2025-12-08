@@ -1,6 +1,6 @@
 # Booster Deploy
 
-Booster Deploy is a lightweight deployment harness for running policies on Booster robots(sim2real), MuJoCo (sim2sim) or Webots(another sim2sim, only for internal use). Booster Deploy borrowed many well-established designs from IsaacLab to provide modular abstractions to run policies in both simulations and real robots with the same code.
+Booster Deploy is a lightweight deployment framework that supports running control policies on Booster robots (sim2real), MuJoCo (sim2sim), and Webots (internal sim2sim). The system adopts many well-established designs from IsaacLab to provide modular abstractions, allowing unified policy execution across both simulated and real robotic platforms.
 
 
 ## Prerequisites
@@ -9,7 +9,7 @@ Booster Deploy is a lightweight deployment harness for running policies on Boost
 |-------------|-------|
 | Booster firmware >= v1.4 | Required for real robot deployments. |
 | Python 3.10+ | Already installed on the robot |
-| ROS 2 Humble | Required for `/low_state` + `/low_cmd` topics. Already installed on the robot. |
+| ROS 2 Humble | Required for `/low_state` + `/joint_ctrl` topics. Already installed on the robot. |
 | MuJoCo / Webots | Optional; install if you plan to run the respective simulators. |
 
 

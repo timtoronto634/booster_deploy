@@ -38,8 +38,8 @@ class BeyondMimicPolicy(Policy):
         )
 
     def reset(self) -> None:
-        self.init_root_quat_w_inv = lab_math.quat_inv(
-            self.robot.data.root_quat_w)
+        self.init_root_yaw_quat_w_inv = lab_math.quat_inv(
+            lab_math.yaw_quat(self.robot.data.root_quat_w))
         self.anchor_index = self.motion.track_body_names.index(
             self.cfg.anchor_body_name)
         self.current_frame = 0
@@ -63,7 +63,7 @@ class BeyondMimicPolicy(Policy):
 
         command = torch.cat([self.cmd_dof_pos, self.cmd_dof_vel], dim=0)
         cur_root_quat_w = lab_math.quat_mul(
-            self.init_root_quat_w_inv, self.robot.data.root_quat_w)
+            self.init_root_yaw_quat_w_inv, self.robot.data.root_quat_w)
 
         pos, ori = lab_math.subtract_frame_transforms(
             self.robot.data.root_pos_w,
