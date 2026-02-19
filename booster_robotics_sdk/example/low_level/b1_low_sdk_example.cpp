@@ -6,12 +6,13 @@
 #include <booster/idl/b1/LowCmd.h>
 #include <booster/idl/b1/MotorCmd.h>
 #include <booster/robot/b1/b1_api_const.hpp>
+#include <booster/robot/b1/b1_loco_client.hpp>
 #include <booster/robot/channel/channel_publisher.hpp>
 
 
 // Before you start to run this example, please make sure the robot is in "Prepare" mode.
 // Then start to run this example and press ENTER to start control.
-// In the same time, you should change the robot mode to "Custom" by api or controller.
+// The program will automatically change the robot mode to "Custom".
 static const std::string kTopicLowSDK = booster::robot::b1::kTopicJointCtrl;
 using namespace booster::robot::b1;
 
@@ -114,6 +115,31 @@ int main(int argc, char const *argv[]) {
   std::cout << "Press ENTER to start ctrl ..." << std::endl;
   std::cin.get();
 
+  booster::robot::b1::B1LocoClient loco_client;
+  loco_client.Init();
+
+  // change to prepare mode first
+  std::cout << "Changing to Prepare mode ..." << std::endl;
+  int32_t ret = loco_client.ChangeMode(booster::robot::RobotMode::kPrepare);
+  if (ret != 0) {
+    std::cerr << "Failed to change to Prepare mode, error code: " << ret << std::endl;
+    return -1;
+  }
+  std::cout << "Changed to Prepare mode successfully!" << std::endl;
+
+  // wait 5 seconds before changing to custom mode
+  std::cout << "Waiting 5 seconds before changing to Custom mode ..." << std::endl;
+  std::this_thread::sleep_for(std::chrono::seconds(5));
+
+  // change to custom mode
+  // std::cout << "Changing to Custom mode ..." << std::endl;
+  // ret = loco_client.ChangeMode(booster::robot::RobotMode::kCustom);
+  // if (ret != 0) {
+  //   std::cerr << "Failed to change to Custom mode, error code: " << ret << std::endl;
+  //   return -1;
+  // }
+  // std::cout << "Changed to Custom mode successfully!" << std::endl;
+
   // start control
   std::cout << "Start low ctrl!" << std::endl;
   float period = 50000.f;
@@ -201,6 +227,18 @@ int main(int argc, char const *argv[]) {
     // sleep
     std::this_thread::sleep_for(sleep_time);
   }
+
+  // wait 5 seconds before changing back to walking mode
+  std::cout << "Waiting 5 seconds before changing to Walking mode ..." << std::endl;
+  std::this_thread::sleep_for(std::chrono::seconds(5));
+
+  std::cout << "Changing to Walking mode ..." << std::endl;
+  ret = loco_client.ChangeMode(booster::robot::RobotMode::kWalking);
+  if (ret != 0) {
+    std::cerr << "Failed to change to Walking mode, error code: " << ret << std::endl;
+    return -1;
+  }
+  std::cout << "Changed to Walking mode successfully!" << std::endl;
 
   std::cout << "Done!" << std::endl;
 
